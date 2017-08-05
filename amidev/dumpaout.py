@@ -3,7 +3,7 @@
 import logging
 import sys
 
-from objtools import aout
+from amidev.binfmt import aout
 
 
 if __name__ == '__main__':

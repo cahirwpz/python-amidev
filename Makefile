@@ -1,15 +1,8 @@
-CC = gcc -m32
-CFLAGS = -g -O2 -Wall -I../target/os-include
+RM = rm -f
 
-BINS = GccFindHit hunk2aout elf2hunk
-
-all: $(BINS)
-
-GccFindHit.o: GccFindHit.c defs.h a.out.h
-hunk2aout.o: hunk2aout.c a.out.h
-elf2hunk.o: elf2hunk.c
+all:
 
 clean:
-	rm -f $(BINS) *.o *~
+	$(RM) -r build dist *~
 
-# vim: set noexpandtab ts=8 sw=8 :
+.PHONY: all clean

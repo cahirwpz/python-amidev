@@ -3,7 +3,7 @@
 import logging
 import sys
 
-from objtools import hunk
+from amidev.binfmt import hunk
 
 
 if __name__ == '__main__':

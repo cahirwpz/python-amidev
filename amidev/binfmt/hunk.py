@@ -6,8 +6,8 @@ import textwrap
 from collections import defaultdict, namedtuple
 from contextlib import contextmanager
 
-import util
-from aout import StringTable, SymbolInfo
+from amidev.utils import hexdump
+from amidev.binfmt.aout import StringTable, SymbolInfo
 
 
 log = logging.getLogger(__name__)

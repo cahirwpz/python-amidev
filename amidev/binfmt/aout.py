@@ -5,7 +5,7 @@ import struct
 from cStringIO import StringIO
 from collections import namedtuple, Sequence
 
-from util import hexdump
+from amidev.utils import hexdump
 
 
 log = logging.getLogger(__name__)

@@ -3,7 +3,7 @@
 import logging
 import sys
 
-from objtools import ar
+from amidev.binfmt import ar
 
 
 if __name__ == '__main__':
