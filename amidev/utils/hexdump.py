@@ -1,17 +1,20 @@
 from __future__ import print_function, unicode_literals
 
 
+def to_ascii(a):
+    b = bytearray(a)
+    for i in range(len(b)):
+        if b[i] < 32 or b[i] >= 128:
+            b[i] = 46
+    return b.decode('ascii')
+
+
 def hexdump(data):
-  hexch = ['%.2x' % ord(c) for c in data]
+    data = bytearray(data)
+    hexch = ['%.2X' % b for b in data]
+    ascii = to_ascii(data)
 
-  ascii = []
-  for c in data:
-    if ord(c) >= 32 and ord(c) < 127:
-      ascii.append(c)
-    else:
-      ascii.append('.')
-
-  for i in range(0, len(hexch), 16):
-    hexstr = ' '.join(hexch[i:i + 16])
-    asciistr = ''.join(ascii[i:i + 16])
-    print('  {2:04} | {0} |{1}|'.format(hexstr.ljust(47, ' '), asciistr, i))
+    for i in range(0, len(hexch), 16):
+        hexstr = ' '.join(hexch[i:i + 16])
+        asciistr = ''.join(ascii[i:i + 16])
+        print('  {2:04} | {0:<47} |{1}|'.format(hexstr, asciistr, i))
