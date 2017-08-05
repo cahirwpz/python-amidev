@@ -1,6 +1,7 @@
 from __future__ import print_function, unicode_literals
 
 import logging
+import io
 import os
 import struct
 import textwrap
@@ -477,9 +478,9 @@ class HunkIndex(Hunk):
             print('')
 
 
-class HunkFile(file):
+class HunkFile(io.FileIO):
     def __init__(self, *args, **kwargs):
-        file.__init__(self, *args, **kwargs)
+        super(HunkFile, self).__init__(*args, **kwargs)
 
         self.size = os.path.getsize(self.name)
         self.type = 'object'
@@ -507,7 +508,7 @@ class HunkFile(file):
             s = self.read(n)
         else:
             s = self.readBytes()
-        return s.strip('\0')
+        return s.decode().strip('\0')
 
     def readSymbol(self, length):
         symbol = self.readString(length)
@@ -604,7 +605,7 @@ HunkClassMap = {
 
 
 def ReadFile(path):
-    with HunkFile(path) as hf:
+    with HunkFile(path, mode='rb') as hf:
         hunks = []
         units = 0
 

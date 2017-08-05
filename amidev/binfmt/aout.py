@@ -1,10 +1,10 @@
 from __future__ import print_function, unicode_literals
 
 import logging
+import io
 import os
 import struct
 
-from cStringIO import StringIO
 from collections import namedtuple, Sequence
 
 from amidev.utils import hexdump
@@ -15,7 +15,7 @@ log = logging.getLogger(__name__)
 
 class Header(namedtuple('Header', ('mid', 'magic', 'text', 'data', 'bss',
                                    'syms', 'entry', 'trsize', 'drsize'))):
-    magic_map = {'OMAGIC': 0407, 'NMAGIC': 0410, 'ZMAGIC': 0413}
+    magic_map = {'OMAGIC': 0o407, 'NMAGIC': 0o410, 'ZMAGIC': 0o413}
     mid_map = {'ZERO': 0, 'SUN010': 1, 'SUN020': 2, 'HP200': 200,
                'HP300': 300, 'HPUX': 0x20C, 'HPUX800': 0x20B}
 
@@ -151,7 +151,6 @@ class StringTable(Sequence):
 
     @classmethod
     def decode(cls, data):
-        data = bytearray(data)
         strings = cls()
         s = 0
         while True:
@@ -180,11 +179,11 @@ class Aout(object):
     def read(self, path):
         self._path = path
 
-        with open(path) as fh:
+        with open(path, mode='rb') as fh:
             log.debug('Reading %r of size %d bytes.',
                       path, os.path.getsize(path))
 
-            data = StringIO(fh.read())
+            data = io.BytesIO(fh.read())
 
             self._header = Header.decode(data)
 

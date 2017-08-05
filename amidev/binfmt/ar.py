@@ -1,10 +1,10 @@
 from __future__ import print_function, unicode_literals
 
 import logging
+import io
 import os
 import struct
 
-from cStringIO import StringIO
 from collections import namedtuple
 
 
@@ -22,6 +22,9 @@ class ArEntry(namedtuple('ArEntry',
 
         name, modtime, owner, group, mode, length, magic = \
             struct.unpack('16s12s6s6s8s10s2s', data)
+
+        magic = magic.decode()
+        name = name.decode()
 
         if magic != '`\n':
             raise ValueError('Not a valid ar archive header!')
@@ -53,10 +56,12 @@ class ArEntry(namedtuple('ArEntry',
 def ReadFile(path):
     entries = []
 
-    with open(path) as fh:
-        data = StringIO(fh.read())
+    with open(path, mode='rb') as fh:
+        data = io.BytesIO(fh.read())
 
-        if data.read(8) != '!<arch>\n':
+        header = data.read(8).decode()
+
+        if header != '!<arch>\n':
             raise ValueError('%s is not an ar archive' % path)
 
         size = os.path.getsize(path)
