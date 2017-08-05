@@ -83,7 +83,7 @@ class RelocInfo(namedtuple('RelocInfo', ('address', 'symbolnum', 'pcrel',
 class SymbolInfo(namedtuple('SymbolInfo', ('strx', 'type', 'other', 'desc',
                                            'value'))):
     # http://sourceware.org/gdb/current/onlinedocs/stabs/Stab-Types.html
-    type_map = [
+    type_list = [
         ('UNDF', 0x00), ('EXT', 0x01), ('ABS', 0x02), ('TEXT', 0x04),
         ('DATA', 0x06), ('BSS', 0x08), ('INDR', 0x0a), ('SIZE', 0x0c),
         ('COMM', 0x12), ('SETA', 0x14), ('SETT', 0x16), ('SETD', 0x18),
@@ -99,6 +99,7 @@ class SymbolInfo(namedtuple('SymbolInfo', ('strx', 'type', 'other', 'desc',
         ('SCOPE', 0xc4), ('RBRAC', 0xe0), ('BCOMM', 0xe2), ('ECOMM', 0xe4),
         ('ECOML', 0xe8), ('WITH', 0xea), ('NBTEXT', 0xf0), ('NBDATA', 0xf2),
         ('NBBSS', 0xf4), ('NBSTS', 0xf6), ('NBLCS', 0xf8)]
+    inv_type_map = dict((n,t) for n, t in type_list)
 
     @classmethod
     def decode(cls, data):
@@ -113,10 +114,7 @@ class SymbolInfo(namedtuple('SymbolInfo', ('strx', 'type', 'other', 'desc',
 
     @property
     def type_str(self):
-        for t, v in self.type_map:
-            if (self.type & ~1) == v:
-                return t
-        return 'DEBUG'
+        return self.inv_type_map.get(self.type & ~1, 'DEBUG')
 
     def as_string(self, strings):
         visibility = 'g' if self.external else 'l'
@@ -153,15 +151,14 @@ class StringTable(Sequence):
 
     @classmethod
     def decode(cls, data):
+        data = bytearray(data)
         strings = cls()
         s = 0
         while True:
-            e = data.find('\0', s)
+            e = data.find(b'\0', s)
+            strings.addString(s + 4, data[s:e].decode('ascii'))
             if e == -1:
-                strings.addString(s + 4, data[s:])
                 break
-            else:
-                strings.addString(s + 4, data[s:e])
             s = e + 1
         return strings
 
