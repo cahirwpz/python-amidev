@@ -1,3 +1,6 @@
+from __future__ import print_function, unicode_literals
+
+
 def hexdump(data):
   hexch = ['%.2x' % ord(c) for c in data]
 
@@ -11,4 +14,4 @@ def hexdump(data):
   for i in range(0, len(hexch), 16):
     hexstr = ' '.join(hexch[i:i + 16])
     asciistr = ''.join(ascii[i:i + 16])
-    print '  {2:04} | {0} |{1}|'.format(hexstr.ljust(47, ' '), asciistr, i)
+    print('  {2:04} | {0} |{1}|'.format(hexstr.ljust(47, ' '), asciistr, i))

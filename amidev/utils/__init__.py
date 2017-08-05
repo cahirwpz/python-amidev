@@ -1,1 +1,1 @@
-from hexdump import hexdump
+from .hexdump import hexdump

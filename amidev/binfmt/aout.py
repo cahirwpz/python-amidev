@@ -1,3 +1,5 @@
+from __future__ import print_function, unicode_literals
+
 import logging
 import os
 import struct
@@ -210,35 +212,35 @@ class Aout(object):
         self._data_relocs.append(RelocInfo.decode(data_reloc[i:i + 8]))
 
   def dump(self):
-    print self._header
-    print ''
+    print(self._header)
+    print('')
 
     if self._text:
-      print 'Text:'
+      print('Text:')
       hexdump(self._text)
-      print ''
+      print('')
 
     if self._data:
-      print 'Data:'
+      print('Data:')
       hexdump(self._data)
-      print ''
+      print('')
 
-    print 'Symbols:'
+    print('Symbols:')
     for symbol in self._symbols:
-      print ' ', symbol.as_string(self._strings)
-    print ''
+      print(' ', symbol.as_string(self._strings))
+    print('')
 
     if self._text_relocs:
-      print 'Text relocations:'
+      print('Text relocations:')
       for reloc in self._text_relocs:
-        print ' ', reloc.as_string(self._strings)
-      print ''
+        print(' ', reloc.as_string(self._strings))
+      print('')
 
     if self._data_relocs:
-      print 'Data relocations:'
+      print('Data relocations:')
       for reloc in self._text_relocs:
-        print ' ', reloc.as_string(self._strings)
-      print ''
+        print(' ', reloc.as_string(self._strings))
+      print('')
 
 
 def ReadFile(path):

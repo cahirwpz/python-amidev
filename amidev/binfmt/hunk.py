@@ -1,3 +1,5 @@
+from __future__ import print_function, unicode_literals
+
 import logging
 import os
 import struct
@@ -105,7 +107,7 @@ class HunkSep(Hunk):
     return cls(type_)
 
   def dump(self):
-    print self.type
+    print(self.type)
 
 
 class HunkStr(Hunk):
@@ -120,11 +122,11 @@ class HunkStr(Hunk):
 
   def dump(self):
     if self.type == 'HUNK_UNIT':
-      print '-' * 80
-      print ''
+      print('-' * 80)
+      print('')
 
-    print self.type
-    print '  ' + repr(self.name)
+    print(self.type)
+    print('  ' + repr(self.name))
 
 
 class HunkBinary(Hunk):
@@ -139,11 +141,11 @@ class HunkBinary(Hunk):
     return cls(type_, flags, hf.readBytes())
 
   def dump(self):
-    print '{0} {1}'.format(self.type, ', '.join(self.flags))
+    print('{0} {1}'.format(self.type, ', '.join(self.flags)))
     if self.data:
-      util.hexdump(self.data)
+      hexdump(self.data)
     else:
-      print '  [empty]'
+      print('  [empty]')
 
 
 class HunkDebug(Hunk):
@@ -191,13 +193,13 @@ class HunkDebug(Hunk):
     return cls('?', hf.read(length))
 
   def dump(self):
-    print '{0} (format: {1!r})'.format(self.type, self.fmt)
+    print('{0} (format: {1!r})'.format(self.type, self.fmt))
 
     if self.fmt is 'GNU':
       for symbol in self.data[0]:
-        print ' ', symbol.as_string(self.data[1])
+        print(' ', symbol.as_string(self.data[1]))
     else:
-      util.hexdump(self.data)
+      hexdump(self.data)
 
 
 class HunkOverlay(Hunk):
@@ -223,8 +225,8 @@ class HunkBss(Hunk):
     return cls(flags, hf.readLong() * 4)
 
   def dump(self):
-    print self.type
-    print '  {0} bytes'.format(self.size)
+    print(self.type)
+    print('  {0} bytes'.format(self.size))
 
 
 class HunkLib(Hunk):
@@ -238,7 +240,7 @@ class HunkLib(Hunk):
     return cls(hf.readLong() * 4)
 
   def dump(self):
-    print self.type
+    print(self.type)
 
 
 class HunkReloc(Hunk):
@@ -260,12 +262,12 @@ class HunkReloc(Hunk):
     return cls(type_, relocs)
 
   def dump(self):
-    print self.type
+    print(self.type)
     for k, nums in self.relocs.items():
       prefix = '  %d: ' % k
-      print textwrap.fill('[' + ', '.join(str(n) for n in sorted(nums)) + ']',
+      print(textwrap.fill('[' + ', '.join(str(n) for n in sorted(nums)) + ']',
                           width=68, initial_indent=prefix,
-                          subsequent_indent=' ' * (len(prefix) + 1))
+                          subsequent_indent=' ' * (len(prefix) + 1)))
 
 
 class HunkSymbol(Hunk):
@@ -279,12 +281,12 @@ class HunkSymbol(Hunk):
     return cls(hf.readSymbols())
 
   def dump(self):
-    print self.type
+    print(self.type)
 
     l = max(len(s.name) for s in self.symbols) + 1
 
     for s in sorted(self.symbols, key=lambda s: s.name):
-      print '  {0}: {1}'.format(s.name.ljust(l, ' '), s.refs)
+      print('  {0}: {1}'.format(s.name.ljust(l, ' '), s.refs))
 
 
 class HunkHeader(Hunk):
@@ -317,11 +319,11 @@ class HunkHeader(Hunk):
     return cls(residents, hunks, first, last, specifiers)
 
   def dump(self):
-    print self.type
-    print '  hunks={0}, first={1}, last={2}'.format(self.hunks, self.first,
-                                                    self.last)
-    print '  residents  : ' + repr(self.residents)
-    print '  specifiers : ' + repr(self.specifiers)
+    print(self.type)
+    print('  hunks={0}, first={1}, last={2}'.format(self.hunks, self.first,
+                                                    self.last))
+    print('  residents  : ' + repr(self.residents))
+    print('  specifiers : ' + repr(self.specifiers))
 
 
 class HunkExt(Hunk):
@@ -373,17 +375,17 @@ class HunkExt(Hunk):
     return cls(hunks)
 
   def dump(self):
-    print self.type
+    print(self.type)
 
     for name, symbols in self.hunks.items():
-      print ' ', name
+      print(' ', name)
       sl = max(len(s.name) for s in symbols)
       for symbol, size, value in symbols:
-        print '   ', symbol.ljust(sl, ' '),
+        print('   ', symbol.ljust(sl, ' '),)
         if value is not None:
-          print '=', sorted(value) if isinstance(value, list) else value
+          print('=', sorted(value) if isinstance(value, list) else value)
         else:
-          print ':', repr(size)
+          print(':', repr(size))
 
 
 class HunkIndex(Hunk):
@@ -456,22 +458,22 @@ class HunkIndex(Hunk):
     return cls(units)
 
   def dump(self):
-    print self.type
+    print(self.type)
 
     for u in self.units:
-      print ' ', 'UNIT', repr(u[0]), u[1]
+      print(' ', 'UNIT', repr(u[0]), u[1])
       for h in u[2]:
-        print '   ', Hunk.getType(h[2]), repr(h[0]), h[1]
+        print('   ', Hunk.getType(h[2]), repr(h[0]), h[1])
         if h[3]:
-          print '     ', 'REFS'
+          print('     ', 'REFS')
           for s in sorted(h[3]):
-            print '       ', s
+            print('       ', s)
         if h[4]:
-          print '     ', 'DEFS'
+          print('     ', 'DEFS')
           l = max(len(s[0]) for s in h[4])
           for s in sorted(h[4], key=lambda x: x[1]):
-            print '       ', s[0].ljust(l), '=', s[1]
-      print ''
+            print('       ', s[0].ljust(l), '=', s[1])
+      print('')
 
 
 class HunkFile(file):
@@ -628,6 +630,6 @@ def ReadFile(path):
         hunks.append(hunk.parse(hf))
       except ValueError:
         log.error('Parse error at position 0x%x.', hf.tell())
-        util.hexdump(hf.read())
+        hexdump(hf.read())
 
     return hunks
