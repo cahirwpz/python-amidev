@@ -10,7 +10,7 @@ from collections import defaultdict, namedtuple
 from contextlib import contextmanager
 
 from amidev.utils import hexdump
-from amidev.binfmt.aout import StringTable, SymbolInfo
+from amidev.binfmt.aout import StringTable, Stab
 
 
 log = logging.getLogger(__name__)
@@ -135,6 +135,7 @@ class HunkBinary(Hunk):
         Hunk.__init__(self, type_)
         self.flags = flags or []
         self.data = data
+        self.size = len(data)
 
     @classmethod
     def parse(cls, hf):
@@ -179,7 +180,7 @@ class HunkDebug(Hunk):
 
             symbols = []
             for i in range(0, symtabsize, 12):
-                symbols.append(SymbolInfo.decode(symtab[i:i + 12]))
+                symbols.append(Stab.decode(symtab[i:i + 12]))
 
             strings = StringTable.decode(strtab)
 

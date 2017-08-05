@@ -80,8 +80,7 @@ class RelocInfo(namedtuple('RelocInfo', ('address', 'symbolnum', 'pcrel',
         return '{0:08x} {1:>6} {2}'.format(self.address, t, s)
 
 
-class SymbolInfo(namedtuple('SymbolInfo', ('strx', 'type', 'other', 'desc',
-                                           'value'))):
+class Stab(namedtuple('Stab', ('strx', 'type', 'other', 'desc', 'value'))):
     # http://sourceware.org/gdb/current/onlinedocs/stabs/Stab-Types.html
     type_list = [
         ('UNDF', 0x00), ('EXT', 0x01), ('ABS', 0x02), ('TEXT', 0x04),
@@ -99,7 +98,7 @@ class SymbolInfo(namedtuple('SymbolInfo', ('strx', 'type', 'other', 'desc',
         ('SCOPE', 0xc4), ('RBRAC', 0xe0), ('BCOMM', 0xe2), ('ECOMM', 0xe4),
         ('ECOML', 0xe8), ('WITH', 0xea), ('NBTEXT', 0xf0), ('NBDATA', 0xf2),
         ('NBBSS', 0xf4), ('NBSTS', 0xf6), ('NBLCS', 0xf8)]
-    inv_type_map = dict((n,t) for n, t in type_list)
+    inv_type_map = dict((t, n) for n, t in type_list)
 
     @classmethod
     def decode(cls, data):
@@ -115,6 +114,12 @@ class SymbolInfo(namedtuple('SymbolInfo', ('strx', 'type', 'other', 'desc',
     @property
     def type_str(self):
         return self.inv_type_map.get(self.type & ~1, 'DEBUG')
+
+    def symbol(self, strings):
+        symbolnum = strings.offsetToIndex(self.strx)
+        if symbolnum == -1:
+            return ''
+        return strings[symbolnum]
 
     def as_string(self, strings):
         visibility = 'g' if self.external else 'l'
@@ -201,7 +206,7 @@ class Aout(object):
             self._strings = StringTable.decode(strings)
 
             for i in range(0, len(symbols), 12):
-                self._symbols.append(SymbolInfo.decode(symbols[i:i + 12]))
+                self._symbols.append(Stab.decode(symbols[i:i + 12]))
 
             for i in range(0, len(text_reloc), 8):
                 self._text_relocs.append(RelocInfo.decode(text_reloc[i:i + 8]))
