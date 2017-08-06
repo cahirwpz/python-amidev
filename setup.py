@@ -1,4 +1,4 @@
-#!/usr/bin/env python2.7
+#!/usr/bin/env python3.5
 # -*- coding: utf-8 -*-
 
 from __future__ import print_function
@@ -11,8 +11,9 @@ from setuptools import setup, find_packages
 scripts = {
   'console_scripts' : [
     'dumphunk = amidev.dumphunk:main',
-    'dumpaout= amidev.dumpaout:main',
+    'dumpaout = amidev.dumpaout:main',
     'dumpar = amidev.dumpar:main',
+    'uaedbg = amidev.uaedbg:main',
   ]
 }
 
