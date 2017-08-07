@@ -13,6 +13,7 @@ scripts = {
     'dumphunk = amidev.dumphunk:main',
     'dumpaout = amidev.dumpaout:main',
     'dumpar = amidev.dumpar:main',
+    'dumpdbg = amidev.dumpdbg:main',
     'uaedbg = amidev.uaedbg:main',
   ]
 }

@@ -1,5 +1,10 @@
 import os
+from collections import namedtuple
+
 from amidev.binfmt import hunk
+
+
+Segment = namedtuple('Segment', 'start size')
 
 
 class Symbol():
@@ -17,7 +22,7 @@ class Symbol():
 
 
 class SourceLine():
-    def __init__(self, address=0, path='', line=0, symbol=None):
+    def __init__(self, address=0, path=None, line=0, symbol=None):
         self.address = address
         self.path = path
         self.line = line
@@ -26,6 +31,10 @@ class SourceLine():
     @property
     def name(self):
         return self.symbol.name
+
+    @property
+    def offset(self):
+        return self.address - self.symbol.address
 
     @name.setter
     def name(self, new_name):
@@ -37,12 +46,19 @@ class SourceLine():
         return self.address < other.address
 
     def __str__(self):
-        return '%08X: %s %s:%d' % (self.address, self.name, self.path, self.line)
+        s = '%08X' % self.address
+        if self.offset == 0:
+            s += ' at <%s>' % self.name
+        else:
+            s += ' at <%s+%d>' % (self.name, self.offset)
+        if self.path:
+            s += ' in "%s:%d"' % (self.path, self.line)
+        return s
 
 
 class Section():
-    def __init__(self, name, start=0, size=0):
-        self.name = name
+    def __init__(self, h, start=0, size=0):
+        self.hunk = h
         self.start = start
         self.size = size
         self.symbols = []
@@ -91,10 +107,10 @@ class Section():
 
     def ask_address(self, addr):
         if self.has_address(addr):
-            candidate = self.lines[0]
-            l = [e for e in self.lines if e.address <= addr] + \
-                [e for e in self.symbols if e.address <= addr]
-            return max(l, key=lambda e: e.address)
+            symbols = [SourceLine(address=s.address, symbol=s)
+                       for s in self.symbols]
+            lines = filter(lambda sl: sl.address <= addr, self.lines + symbols)
+            return max(lines, key=lambda e: e.address)
 
     def ask_symbol(self, name):
         for s in self.symbols:
@@ -110,7 +126,7 @@ class Section():
         return self.start <= addr and addr < self.end
 
     def dump(self):
-        print('%s [%08X - %08X]:' % (self.name, self.start, self.end))
+        print('%s [%08X - %08X]:' % (self.hunk.type, self.start, self.end))
         print('  SYMBOLS:')
         for s in self.symbols:
             print('    ' + str(s))
@@ -121,31 +137,33 @@ class Section():
 
 class DebugInfo():
     stab_to_section = {'GSYM': 'COMMON', 'STSYM': 'DATA', 'LCSYM': 'BSS'}
-    hunk_to_section = {'HUNK_CODE': 'TEXT',
-                       'HUNK_DATA': 'DATA',
-                       'HUNK_BSS': 'BSS'}
 
     def __init__(self, sections):
         self.sections = sections
 
-    def relocate(self, name, start, size):
-        return self.sections[name].relocate(start, size)
+    def relocate(self, segments):
+        if len(self.sections) != len(segments):
+            return False
+        for sec, seg in zip(self.sections, segments):
+            if not sec.relocate(seg.start, seg.size):
+                return False
+        return True
 
     def dump(self):
-        for name in ['TEXT', 'DATA', 'BSS']:
-            self.sections[name].dump()
+        for section in self.sections:
+            section.dump()
 
     def ask_address(self, addr):
-        for section in self.sections.values():
-            l = section.ask_address(addr)
-            if l:
-                return l
+        for section in self.sections:
+            line = section.ask_address(addr)
+            if line:
+                return line
 
     def ask_symbol(self, name):
-        for section in self.sections.values():
-            a = section.ask_symbol(name)
-            if a:
-                return a
+        for section in self.sections:
+            addr = section.ask_symbol(name)
+            if addr:
+                return addr
 
     def ask_source_line(self, where):
         path, line = '', 0
@@ -156,15 +174,16 @@ class DebugInfo():
         except ValueError:
             return
 
-        for section in self.sections.values():
-            a = section.ask_source_line(path, line)
-            if a:
-                return a
+        for section in self.sections:
+            addr = section.ask_source_line(path, line)
+            if addr:
+                return addr
 
     @classmethod
     def fromFile(cls, executable):
-        sections = {'COMMON': Section('COMMON')}
-        current = None
+        sections = []
+        common = Section(None)
+        last = {'CODE': None, 'DATA': None, 'BSS': None, 'COMMON': common}
         start = 0
         size = 0
 
@@ -173,17 +192,17 @@ class DebugInfo():
 
             if h.type in ['HUNK_CODE', 'HUNK_DATA', 'HUNK_BSS']:
                 start += size
-                name = cls.hunk_to_section[h.type]
                 size = h.size
-                current = Section(name, start, size)
-                sections[name] = current
+                sec = Section(h, start, size)
+                last[h.type[5:]] = sec
+                sections.append(sec)
 
             elif h.type is 'HUNK_SYMBOL':
                 for s in h.symbols:
                     address, name = s.refs + start, s.name
                     if name[0] == '_':
                         name = name[1:]
-                    current.symbols.append(Symbol(address, name))
+                    sections[-1].symbols.append(Symbol(address, name))
 
             elif h.type is 'HUNK_DEBUG':
                 stabs, strings = h.data
@@ -210,7 +229,7 @@ class DebugInfo():
                     # N_BSS: BSS symbol
                     if st.type_str in ['DATA', 'BSS']:
                         s = Symbol(st.value, stabsym)
-                        sections[st.type_str].symbols.append(s)
+                        last[st.type_str].symbols.append(s)
 
                     # N_GSYM: global symbol
                     # N_STSYM: data segment file-scope variable
@@ -218,25 +237,23 @@ class DebugInfo():
                     if st.type_str in ['GSYM', 'STSYM', 'LCSYM']:
                         s = Symbol(st.value, stabsym.split(':')[0])
                         sl = SourceLine(st.value, source, st.desc, s)
-                        sec = sections[cls.stab_to_section[st.type_str]]
+                        sec = last[cls.stab_to_section[st.type_str]]
                         sec.symbols.append(s)
                         sec.lines.append(sl)
 
                     # N_SLINE: line number in text segment
                     if st.type_str in ['SLINE']:
                         sl = SourceLine(st.value, source, st.desc, func)
-                        sections['TEXT'].lines.append(sl)
+                        last['CODE'].lines.append(sl)
 
                     # N_FUN: function name or text segment variable
                     if st.type_str in ['FUN']:
                         func.address = st.value
                         func.name = stabsym.split(':')[0]
-                        sections['TEXT'].symbols.append(func)
+                        last['CODE'].symbols.append(func)
                         func = Symbol()
 
-        for name in ['TEXT', 'DATA', 'BSS']:
-            sections[name].cleanup(sections['COMMON'].lines)
-        del sections['COMMON']
+        for section in sections:
+            section.cleanup(common.lines)
+
         return cls(sections)
-
-
