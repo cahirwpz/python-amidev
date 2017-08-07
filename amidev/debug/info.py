@@ -1,10 +1,150 @@
 import os
+import re
 from collections import namedtuple
 
 from amidev.binfmt import hunk
 
 
 Segment = namedtuple('Segment', 'start size')
+
+
+class StabInfoParser():
+    Field = namedtuple('Field', 'name type offset size')
+    StructType = namedtuple('StructType', 'size fields')
+    UnionType = namedtuple('UnionType', 'size fields')
+    MachType = namedtuple('MachType', 'id min max')
+    AliasType = namedtuple('AliasType', 'id')
+    ArrayType = namedtuple('ArrayType', 'i j k type')
+    FunctionType = namedtuple('FunctionType', 'id')
+    PointerType = namedtuple('PointerType', 'id')
+    TypeDecl = namedtuple('TypeDecl', 'id')
+    ForwardDecl = namedtuple('ForwardDecl', 'type name')
+    Info = namedtuple('Info', 'symbol info')
+
+    def __init__(self):
+        self._data = ''
+        self._pos = 0
+
+        self._typemap = [
+            ('ar', self.__ArrayType),
+            ('t', self.__TypeDecl),
+            ('T', self.__TypeDecl),
+            ('r', self.__MachType),
+            ('s', self.__StructType),
+            ('u', self.__UnionType),
+            ('f', self.__FunctionType),
+            ('*', self.__PointerType),
+            ('x', self.__ForwardDecl)]
+
+    def expect(self, string):
+        if not self._data.startswith(string, self._pos):
+            raise ValueError(self.rest())
+        self._pos += len(string)
+
+    def consume(self, regex):
+        m = regex.match(self._data, self._pos)
+        if not m:
+            raise ValueError(self.rest())
+        self._pos += len(m.group(0))
+        return m.group(0)
+
+    def peek(self, string):
+        if not self._data.startswith(string, self._pos):
+            return False
+        self._pos += len(string)
+        return True
+
+    TLabel = re.compile(r'[A-Za-z0-9_ ]+')
+    TNumber = re.compile(r'-?[0-9]+')
+
+    def rest(self):
+        return self._data[self._pos:]
+
+    def __Label(self):
+        return self.consume(self.TLabel)
+
+    def __Number(self):
+        number = self.consume(self.TNumber)
+        if number[0] == '0':
+            return int(number, 8)
+        return int(number)
+
+    def __Field(self):
+        name = self.__Label(), self.expect(':')
+        typedef = self.__TypeDef(), self.expect(',')
+        offset = self.__Number(), self.expect(',')
+        size = self.__Number(), self.expect(';')
+        return self.Field(name, typedef, offset, size)
+
+    def __ArrayType(self):
+        i, _ = self.__Number(), self.expect(';')
+        j, _ = self.__Number(), self.expect(';')
+        k, _ = self.__Number(), self.expect(';')
+        typ = self.__Type()
+        return self.ArrayType(i, j, k, typ)
+
+    def __TypeDecl(self):
+        return self.TypeDecl(self.__Number())
+
+    def __MachType(self):
+        _id, _ = self.__Number(), self.expect(';')
+        _min, _ = self.__Number(), self.expect(';')
+        _max, _ = self.__Number(), self.expect(';')
+        if _min > 0:
+            _min = -_min
+        return self.MachType(_id, _min, _max)
+
+    def __StructType(self):
+        size = self.__Number()
+        fields = []
+        while not self.peek(';'):
+            fields.append(self.__Field())
+        return self.StructType(size, fields)
+
+    def __UnionType(self):
+        size = self.__Number()
+        fields = []
+        while not self.peek(';'):
+            fields.append(self.__Field())
+        return self.UnionType(size, fields)
+
+    def __FunctionType(self):
+        return self.FunctionType(self.__Number())
+
+    def __PointerType(self):
+        return self.PointerType(self.__Number())
+
+    def __ForwardDecl(self):
+        typ = ''
+        if self.peek('s'):
+            typ = 'struct'
+        elif self.peek('u'):
+            typ = 'union'
+        else:
+            raise ValueError(self.rest())
+        name, _ = self.__Label(), self.expect(':')
+        return self.ForwardDecl(typ, name)
+
+    def __Type(self):
+        for tid, func in self._typemap:
+            if self.peek(tid):
+                return func()
+        return self.AliasType(self.__Number())
+
+    def __TypeDef(self):
+        typelist = [self.__Type()]
+        while self.peek('='):
+            typelist.append(self.__Type())
+        return typelist
+
+    def __Info(self):
+        symbol, _, info = self.__Label(), self.expect(':'), self.__TypeDef()
+        return self.Info(symbol, info)
+
+    def __call__(self, s):
+        self._data = s
+        self._pos = 0
+        return self.__Info()
 
 
 class Symbol():
@@ -187,6 +327,8 @@ class DebugInfo():
         start = 0
         size = 0
 
+        parser = StabInfoParser()
+
         for h in hunk.ReadFile(executable):
             # h.dump()
 
@@ -210,6 +352,7 @@ class DebugInfo():
                 func = Symbol()
                 path = ''
                 source = ''
+                lsym = ''
 
                 for st in stabs:
                     stabsym = st.symbol(strings)
@@ -240,6 +383,15 @@ class DebugInfo():
                         sec = last[cls.stab_to_section[st.type_str]]
                         sec.symbols.append(s)
                         sec.lines.append(sl)
+
+                    # N_LSYM: stack variable or type
+                    if st.type_str in ['LSYM']:
+                        if stabsym.endswith('\\'):
+                            lsym += stabsym[:-1]
+                        else:
+                            lsym += stabsym
+                            parser(lsym)
+                            lsym = ''
 
                     # N_SLINE: line number in text segment
                     if st.type_str in ['SLINE']:
