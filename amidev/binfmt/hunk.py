@@ -161,45 +161,38 @@ class HunkDebug(Hunk):
         hf.readHunk('HUNK_DEBUG')
         length = hf.readLong() * 4
 
-        with hf.rollback():
-            fmt1 = hf.readLong()
-            fmt2 = hf.readString(4)
-
-        if fmt1 == 0x10b:
+        if hf.readLong() == 0x10b:
             # magic-number: 0x10b
             # symtabsize strtabsize
             # symtabdata [length=symtabsize]
             # strtabdata [length=strtabsize]
             # [pad bytes]
-            hf.skip(4)
             symtabsize = hf.readLong()
             strtabsize = hf.readLong()
             symtab = hf.read(symtabsize)
             hf.skip(4)
             strtab = hf.read(strtabsize)
 
-            symbols = []
-            for i in range(0, symtabsize, 12):
-                symbols.append(Stab.decode(symtab[i:i + 12]))
-
+            chunks = [symtab[i:i + 12] for i in range(0, symtabsize, 12)]
             strings = StringTable.decode(strtab)
+            stabs = [Stab.decode(chunk, strings) for chunk in chunks]
 
             if strtabsize & 3:
                 hf.skip(4 - strtabsize & 3)
 
-            return cls('GNU', (symbols, strings))
-        elif fmt2 == 'OPTS':
-            hf.skip(8)
+            return cls('GNU', stabs)
+
+        if hf.readString(4) == 'OPTS':
             return cls('SAS/C opts', hf.read(length - 8))
 
-        return cls('?', hf.read(length))
+        return cls('?', hf.read(length - 8))
 
     def dump(self):
         print('{0} (format: {1!r})'.format(self.type, self.fmt))
 
         if self.fmt == 'GNU':
-            for symbol in self.data[0]:
-                print(' ', symbol.as_string(self.data[1]))
+            for stab in self.data:
+                print(' ', stab.as_string())
         else:
             hexdump(self.data)
 
@@ -632,7 +625,8 @@ def ReadFile(path):
             try:
                 hunks.append(hunk.parse(hf))
             except ValueError:
-                log.error('Parse error at position 0x%x.', hf.tell())
+                log.error('Parse error at position 0x%x (in %s)',
+                          hf.tell(), type_)
                 hexdump(hf.read())
 
         return hunks

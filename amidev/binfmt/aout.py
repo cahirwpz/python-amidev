@@ -80,7 +80,8 @@ class RelocInfo(namedtuple('RelocInfo', ('address', 'symbolnum', 'pcrel',
         return '{0:08x} {1:>6} {2}'.format(self.address, t, s)
 
 
-class Stab(namedtuple('Stab', ('strx', 'type', 'other', 'desc', 'value'))):
+class Stab(namedtuple('Stab',
+                      ('str', 'type', 'ext', 'other', 'desc', 'value'))):
     # http://sourceware.org/gdb/current/onlinedocs/stabs/Stab-Types.html
     type_list = [
         ('UNDF', 0x00), ('EXT', 0x01), ('ABS', 0x02), ('TEXT', 0x04),
@@ -101,36 +102,20 @@ class Stab(namedtuple('Stab', ('strx', 'type', 'other', 'desc', 'value'))):
     inv_type_map = dict((t, n) for n, t in type_list)
 
     @classmethod
-    def decode(cls, data):
-        n_strx, n_type, n_other, n_desc, n_value = \
-            struct.unpack('>iBbhI', data)
+    def decode(cls, data, strtab):
+        _stroff, _bintype, _other, _desc, _value = struct.unpack('>iBbhI', data)
+        try:
+            _str = strtab.stringAtOffset(_stroff)
+        except IndexError:
+            _str = ''
+        _ext = _bintype & 1
+        _type = cls.inv_type_map.get(_bintype & ~1, 'DEBUG')
+        return cls(_str, _type, _ext, _other, _desc, _value)
 
-        return cls(n_strx, n_type, n_other, n_desc, n_value)
-
-    @property
-    def external(self):
-        return bool(self.type & 1)
-
-    @property
-    def type_str(self):
-        return self.inv_type_map.get(self.type & ~1, 'DEBUG')
-
-    def symbol(self, strings):
-        symbolnum = strings.offsetToIndex(self.strx)
-        if symbolnum == -1:
-            return ''
-        return strings[symbolnum]
-
-    def as_string(self, strings):
-        visibility = 'g' if self.external else 'l'
-        symbolnum = strings.offsetToIndex(self.strx)
-        if symbolnum == -1:
-            symbol = ''
-        else:
-            symbol = strings[symbolnum]
-        return '{3:08x} {5} {0:<5} {2:04x} {1:02x} {6:02x} {4}'.format(
-            self.type_str, self.other, self.desc, self.value, symbol,
-            visibility, self.type)
+    def as_string(self):
+        visibility = ['l', 'g'][self.ext]
+        return '{3:08x} {5} {0:<5} {2:04x} {1:02x} {4}'.format(
+            self.type, self.other, self.desc, self.value, self.str, visibility)
 
 
 class StringTable(Sequence):
@@ -166,8 +151,8 @@ class StringTable(Sequence):
             s = e + 1
         return strings
 
-    def offsetToIndex(self, offset):
-        return self._map.get(offset, -1)
+    def stringAtOffset(self, offset):
+        return self._table[self._map.get(offset)]
 
 
 class Aout(object):
@@ -206,7 +191,7 @@ class Aout(object):
             self._strings = StringTable.decode(strings)
 
             for i in range(0, len(symbols), 12):
-                self._symbols.append(Stab.decode(symbols[i:i + 12]))
+                self._symbols.append(Stab.decode(symbols[i:i + 12], strings))
 
             for i in range(0, len(text_reloc), 8):
                 self._text_relocs.append(RelocInfo.decode(text_reloc[i:i + 8]))
