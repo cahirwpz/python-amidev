@@ -104,10 +104,7 @@ class Stab(namedtuple('Stab',
     @classmethod
     def decode(cls, data, strtab):
         _stroff, _bintype, _other, _desc, _value = struct.unpack('>iBbhI', data)
-        try:
-            _str = strtab.stringAtOffset(_stroff)
-        except IndexError:
-            _str = ''
+        _str = strtab.stringAtOffset(_stroff)
         _ext = _bintype & 1
         _type = cls.inv_type_map.get(_bintype & ~1, 'DEBUG')
         return cls(_str, _type, _ext, _other, _desc, _value)
@@ -152,7 +149,10 @@ class StringTable(Sequence):
         return strings
 
     def stringAtOffset(self, offset):
-        return self._table[self._map.get(offset)]
+        index = self._map.get(offset)
+        if index is None:
+            return ''
+        return self._table[index]
 
 
 class Aout(object):
@@ -191,7 +191,7 @@ class Aout(object):
             self._strings = StringTable.decode(strings)
 
             for i in range(0, len(symbols), 12):
-                self._symbols.append(Stab.decode(symbols[i:i + 12], strings))
+                self._symbols.append(Stab.decode(symbols[i:i + 12], self._strings))
 
             for i in range(0, len(text_reloc), 8):
                 self._text_relocs.append(RelocInfo.decode(text_reloc[i:i + 8]))
@@ -215,7 +215,7 @@ class Aout(object):
 
         print('Symbols:')
         for symbol in self._symbols:
-            print(' ', symbol.as_string(self._strings))
+            print(' ', symbol.as_string())
         print('')
 
         if self._text_relocs:

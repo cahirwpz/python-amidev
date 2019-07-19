@@ -9,56 +9,80 @@ Segment = namedtuple('Segment', 'start size')
 
 
 class StabInfoParser():
+    # https://sourceware.org/gdb/onlinedocs/stabs/
+
+    Types = namedtuple('Types', 'decls')
+    Entry = namedtuple('Entry', 'name value')
     Field = namedtuple('Field', 'name type offset size')
     StructType = namedtuple('StructType', 'size fields')
     UnionType = namedtuple('UnionType', 'size fields')
-    MachType = namedtuple('MachType', 'id min max')
-    AliasType = namedtuple('AliasType', 'id')
-    ArrayType = namedtuple('ArrayType', 'i j k type')
-    FunctionType = namedtuple('FunctionType', 'id')
-    PointerType = namedtuple('PointerType', 'id')
-    TypeDecl = namedtuple('TypeDecl', 'id')
+    EnumType = namedtuple('EnumType', 'values')
+    SizeOf = namedtuple('SizeOf', 'size type')
+    Subrange = namedtuple('Subrange', 'itype lo hi')
+    ArrayType = namedtuple('ArrayType', 'range type')
+    Function = namedtuple('Function', 'name attr type')
+    FunctionType = namedtuple('FunctionType', 'type')
+    Pointer = namedtuple('Pointer', 'type')
+    Parameter = namedtuple('Parameter', 'name attr type')
+    Register = namedtuple('Register', 'name type')
+    Variable = namedtuple('Variable', 'name attr type')
     ForwardDecl = namedtuple('ForwardDecl', 'type name')
-    Info = namedtuple('Info', 'symbol info')
+    Info = namedtuple('Info', 'name info')
+    TypeDecl = namedtuple('TypeDecl', 'name type')
 
-    def __init__(self):
+    def __init__(self, typemap):
         self._data = ''
+        self._typemap = typemap
         self._pos = 0
 
-        self._typemap = [
-            ('ar', self.__ArrayType),
-            ('t', self.__TypeDecl),
-            ('T', self.__TypeDecl),
-            ('r', self.__MachType),
-            ('s', self.__StructType),
-            ('u', self.__UnionType),
-            ('f', self.__FunctionType),
-            ('*', self.__PointerType),
-            ('x', self.__ForwardDecl)]
+    def read(self):
+        try:
+            char = self._data[self._pos]
+            self._pos += 1
+            return char
+        except IndexError:
+            return None
 
-    def expect(self, string):
-        if not self._data.startswith(string, self._pos):
-            raise ValueError(self.rest())
-        self._pos += len(string)
+    def unread(self):
+        self._pos -= 1
+
+    def expect(self, char):
+        try:
+            last = self._data[self._pos]
+        except IndexError:
+            last = None
+        if last != char:
+            raise ValueError('Expected "%s" got "%s" in "%s"' %
+                             (char, self.rest()[0], self._data))
+        self._pos += 1
 
     def consume(self, regex):
         m = regex.match(self._data, self._pos)
         if not m:
-            raise ValueError(self.rest())
-        self._pos += len(m.group(0))
+            raise ValueError('Expected "%s" got "%s" in "%s"' %
+                             (regex.pattern, self.rest(), self._data))
+        self._pos = m.end()
         return m.group(0)
 
-    def peek(self, string):
-        if not self._data.startswith(string, self._pos):
+    def peek(self, char):
+        try:
+            last = self._data[self._pos]
+        except IndexError:
+            last = None
+        if last != char:
             return False
-        self._pos += len(string)
+        self._pos += 1
         return True
-
-    TLabel = re.compile(r'[A-Za-z0-9_ ]+')
-    TNumber = re.compile(r'-?[0-9]+')
 
     def rest(self):
         return self._data[self._pos:]
+
+    def addType(self, n, v):
+        self._typemap[n] = v
+        return v
+
+    TLabel = re.compile('[A-Za-z0-9_ ]+')
+    TNumber = re.compile('-?[0-9]+')
 
     def __Label(self):
         return self.consume(self.TLabel)
@@ -70,81 +94,136 @@ class StabInfoParser():
         return int(number)
 
     def __Field(self):
-        name = self.__Label(), self.expect(':')
-        typedef = self.__TypeDef(), self.expect(',')
-        offset = self.__Number(), self.expect(',')
-        size = self.__Number(), self.expect(';')
-        return self.Field(name, typedef, offset, size)
-
-    def __ArrayType(self):
-        i, _ = self.__Number(), self.expect(';')
-        j, _ = self.__Number(), self.expect(';')
-        k, _ = self.__Number(), self.expect(';')
-        typ = self.__Type()
-        return self.ArrayType(i, j, k, typ)
-
-    def __TypeDecl(self):
-        return self.TypeDecl(self.__Number())
-
-    def __MachType(self):
-        _id, _ = self.__Number(), self.expect(';')
-        _min, _ = self.__Number(), self.expect(';')
-        _max, _ = self.__Number(), self.expect(';')
-        if _min > 0:
-            _min = -_min
-        return self.MachType(_id, _min, _max)
-
-    def __StructType(self):
-        size = self.__Number()
-        fields = []
-        while not self.peek(';'):
-            fields.append(self.__Field())
-        return self.StructType(size, fields)
-
-    def __UnionType(self):
-        size = self.__Number()
-        fields = []
-        while not self.peek(';'):
-            fields.append(self.__Field())
-        return self.UnionType(size, fields)
-
-    def __FunctionType(self):
-        return self.FunctionType(self.__Number())
-
-    def __PointerType(self):
-        return self.PointerType(self.__Number())
-
-    def __ForwardDecl(self):
-        typ = ''
-        if self.peek('s'):
-            typ = 'struct'
-        elif self.peek('u'):
-            typ = 'union'
-        else:
-            raise ValueError(self.rest())
         name, _ = self.__Label(), self.expect(':')
-        return self.ForwardDecl(typ, name)
+        typ, _ = self.__TypeDecl(), self.expect(',')
+        offset, _ = self.__Number(), self.expect(',')
+        size, _ = self.__Number(), self.expect(';')
+        return self.Field(name, typ, offset, size)
 
     def __Type(self):
-        for tid, func in self._typemap:
-            if self.peek(tid):
-                return func()
-        return self.AliasType(self.__Number())
+        last = self.read()
 
-    def __TypeDef(self):
-        typelist = [self.__Type()]
-        while self.peek('='):
-            typelist.append(self.__Type())
-        return typelist
+        if last == 'a':
+            arange = self.__Type()
+            eltype = self.__TypeDecl()
+            return self.ArrayType(arange, eltype)
+
+        if last == 'r':
+            _of, _ = self.__Number(), self.expect(';')
+            _lo, _ = self.__Number(), self.expect(';')
+            _hi, _ = self.__Number(), self.expect(';')
+            if _lo > 0 and _hi > 0:
+                _lo = -_lo
+            return self.Subrange(_of, _lo, _hi)
+
+        if last == 's':
+            size = self.__Number()
+            fields = []
+            while not self.peek(';'):
+                fields.append(self.__Field())
+            return self.StructType(size, fields)
+
+        if last == 'u':
+            size = self.__Number()
+            fields = []
+            while not self.peek(';'):
+                fields.append(self.__Field())
+            return self.UnionType(size, fields)
+
+        if last == 'f' or last == 'F':
+            return self.FunctionType(self.__Number())
+
+        if last == '*':
+            return self.Pointer(self.__Type())
+
+        if last == 'x':
+            if self.peek('s'):
+                typ = 'struct'
+            elif self.peek('u'):
+                typ = 'union'
+            else:
+                raise ValueError(self.rest())
+            name, _ = self.__Label(), self.expect(':')
+            return self.ForwardDecl(typ, name)
+
+        if last == '@':
+            if self.peek('s'):
+                kind = 'struct'
+            else:
+                raise ValueError(self.rest())
+            size, _, typ = self.__Number(), self.expect(';'), self.__Type()
+            return self.SizeOf(size, typ)
+
+        if last == 'e':
+            entries = []
+            while not self.peek(';'):
+                name, _ = self.__Label(), self.expect(':')
+                value, _ = self.__Number(), self.expect(',')
+                entries.append(self.Entry(name, value))
+            return self.EnumType(entries)
+
+        self.unread()
+
+        return self.__Number()
+
+    def __TypeDecl(self):
+        ref = self.__Type()
+        if self.peek('='):
+            if isinstance(ref, int):
+                self.addType(ref, self.__TypeDecl())
+            elif isinstance(ref, self.Pointer):
+                self.addType(ref.type, self.__TypeDecl())
+            else:
+                raise RuntimeError(type(ref), self.rest())
+        return ref
 
     def __Info(self):
-        symbol, _, info = self.__Label(), self.expect(':'), self.__TypeDef()
-        return self.Info(symbol, info)
+        name, _ = self.__Label(), self.expect(':')
+
+        last = self.read()
+
+        if last == 't' or last == 'T':
+            return self.__TypeDecl()
+        if last == 'G':
+            return self.Variable(name, ['global'], self.__TypeDecl())
+        if last == 'S':
+            return self.Variable(name, ['local', 'file'], self.__TypeDecl())
+        if last == 'V':
+            return self.Variable(name, ['local', 'scope'], self.__TypeDecl())
+        if last == 'f':
+            return self.Function(name, ['local'], self.__TypeDecl())
+        if last == 'F':
+            return self.Function(name, ['global'], self.__TypeDecl())
+        if last == 'r':
+            return self.Register(name, self.__TypeDecl())
+        if last == 'p':
+            return self.Parameter(name, ['stack'], self.__TypeDecl())
+        if last == 'P':
+            return self.Parameter(name, ['register'], self.__TypeDecl())
+
+        self.unread()
+
+        return self.__TypeDecl()
+
+    def get(self):
+        si = self.__Info()
+        if self._pos < len(self._data):
+            raise ValueError(self.rest())
+        self._data = ''
+        self._pos = 0
+        return si
+
+    def feed(self, s):
+        if s[-1] == '\\':
+            self._data += s[:-1]
+            return False
+        self._data += s
+        return True
 
     def __call__(self, s):
         self._data = s
         self._pos = 0
-        return self.__Info()
+        return self.get()
 
 
 class Symbol():
@@ -194,6 +273,16 @@ class SourceLine():
         if self.path:
             s += ' in "%s:%d"' % (self.path, self.line)
         return s
+
+
+class SourceFile():
+    def __init__(self, filename):
+        self.filename = filename
+        self.typemap = {}
+        self.parser = StabInfoParser(self.typemap)
+
+    def __str__(self):
+        return self.filename
 
 
 class Section():
@@ -275,11 +364,40 @@ class Section():
             print('    ' + str(l))
 
 
+Scope = namedtuple('Scope', 'begin end values')
+
+
+class Function():
+    def __init__(self):
+        self.symbol = Symbol()
+
+        self._scopes = [Scope(0, 0, {})]
+        self._begin = None
+        self._end = None
+
+    def enterScope(self, addr):
+        self._scopes.append(Scope(addr, 0, {}))
+
+    def leaveScope(self, addr):
+        vardict = {}
+        for scope in reversed(self._scopes):
+            for n, v in scope.values.items():
+                if n in vardict:
+                    continue
+                vardict[n] = v
+        s = self._scopes.pop()
+        return s._replace(end=addr, values=vardict)
+
+    def add(self, n, v):
+        self._scopes[-1].values[n] = v
+
+
 class DebugInfo():
     stab_to_section = {'GSYM': 'COMMON', 'STSYM': 'DATA', 'LCSYM': 'BSS'}
 
-    def __init__(self, sections):
-        self.sections = sections
+    def __init__(self):
+        self.sections = []
+        self.files = []
 
     def relocate(self, segments):
         if len(self.sections) != len(segments):
@@ -298,6 +416,9 @@ class DebugInfo():
             line = section.ask_address(addr)
             if line:
                 return line
+
+    def ask_variables(self, addr):
+        pass
 
     def ask_symbol(self, name):
         for section in self.sections:
@@ -319,93 +440,117 @@ class DebugInfo():
             if addr:
                 return addr
 
-    @classmethod
-    def fromFile(cls, executable):
-        sections = []
+    def fromFile(self, executable):
         common = Section(None)
         last = {'CODE': None, 'DATA': None, 'BSS': None, 'COMMON': common}
         start = 0
         size = 0
 
-        parser = StabInfoParser()
-
         for h in hunk.ReadFile(executable):
-            # h.dump()
 
             if h.type in ['HUNK_CODE', 'HUNK_DATA', 'HUNK_BSS']:
                 start += size
                 size = h.size
                 sec = Section(h, start, size)
                 last[h.type[5:]] = sec
-                sections.append(sec)
+                self.sections.append(sec)
 
             elif h.type is 'HUNK_SYMBOL':
                 for s in h.symbols:
                     address, name = s.refs + start, s.name
                     if name[0] == '_':
                         name = name[1:]
-                    sections[-1].symbols.append(Symbol(address, name))
+                    self.sections[-1].symbols.append(Symbol(address, name))
 
             elif h.type is 'HUNK_DEBUG':
-                stabs, strings = h.data
+                stabs = h.data
 
-                func = Symbol()
-                path = ''
-                source = ''
-                lsym = ''
+                # h.dump()
+
+                func = Function()
+                dirname = ''
+                filename = ''
+                source = None
 
                 for st in stabs:
-                    stabsym = st.symbol(strings)
-
                     # N_SO: path and name of source file
                     # N_SOL: name of include file
-                    if st.type_str in ['SO', 'SOL']:
-                        if stabsym.endswith('/'):
-                            path = stabsym
+                    if st.type in ['SO', 'SOL']:
+                        if st.str[-1] == '/':
+                            dirname = st.str
                         else:
-                            if stabsym.startswith('/'):
-                                source = stabsym
+                            if st.str[0] == '/':
+                                filename = st.str
                             else:
-                                source = os.path.join(path, stabsym)
+                                filename = dirname + st.str
+                            if st.type == 'SO':
+                                source = SourceFile(filename)
 
                     # N_DATA: data symbol
                     # N_BSS: BSS symbol
-                    if st.type_str in ['DATA', 'BSS']:
-                        s = Symbol(st.value, stabsym)
-                        last[st.type_str].symbols.append(s)
+                    elif st.type in ['DATA', 'BSS']:
+                        s = Symbol(st.value, st.str)
+                        last[st.type].symbols.append(s)
 
                     # N_GSYM: global symbol
                     # N_STSYM: data segment file-scope variable
                     # N_LCSYM: BSS segment file-scope variable
-                    if st.type_str in ['GSYM', 'STSYM', 'LCSYM']:
-                        s = Symbol(st.value, stabsym.split(':')[0])
-                        sl = SourceLine(st.value, source, st.desc, s)
-                        sec = last[cls.stab_to_section[st.type_str]]
-                        sec.symbols.append(s)
-                        sec.lines.append(sl)
+                    elif st.type in ['GSYM', 'STSYM', 'LCSYM']:
+                        if source.parser.feed(st.str):
+                            si = source.parser.get()
+                            s = Symbol(st.value, si.name)
+                            sl = SourceLine(st.value, source, st.desc, s)
+                            sec = last[DebugInfo.stab_to_section[st.type]]
+                            sec.symbols.append(s)
+                            sec.lines.append(sl)
 
                     # N_LSYM: stack variable or type
-                    if st.type_str in ['LSYM']:
-                        if stabsym.endswith('\\'):
-                            lsym += stabsym[:-1]
-                        else:
-                            lsym += stabsym
-                            parser(lsym)
-                            lsym = ''
+                    elif st.type in ['LSYM']:
+                        if source.parser.feed(st.str):
+                            si = source.parser.get()
 
                     # N_SLINE: line number in text segment
-                    if st.type_str in ['SLINE']:
-                        sl = SourceLine(st.value, source, st.desc, func)
+                    elif st.type in ['SLINE']:
+                        # address, path, line, symbol
+                        sl = SourceLine(st.value, source, st.desc, func.symbol)
                         last['CODE'].lines.append(sl)
 
                     # N_FUN: function name or text segment variable
-                    if st.type_str in ['FUN']:
-                        func.address = st.value
-                        func.name = stabsym.split(':')[0]
-                        last['CODE'].symbols.append(func)
-                        func = Symbol()
+                    elif st.type in ['FUN']:
+                        si = source.parser(st.str)
+                        func.symbol.address = st.value
+                        func.symbol.name = si.name
+                        last['CODE'].symbols.append(func.symbol)
+                        func = Function()
 
-        for section in sections:
+                    elif st.type in ['TEXT']:
+                        pass
+
+                    elif st.type in ['LBRAC']:
+                        func.enterScope(st.value)
+
+                    elif st.type in ['RBRAC']:
+                        varlst = func.leaveScope(st.value)
+                        # print(varlst)
+
+                    # N_RSYM: register variable
+                    elif st.type in ['RSYM']:
+                        if source.parser.feed(st.str):
+                            si = source.parser.get()
+                            # print('ParamReg(line=%d name="%s" num=%d type=%d)'
+                            #       % (st.desc, si.name, st.value, si.type))
+                            func.add(si.name, si.type)
+
+                    # N_PSYM: parameter variable
+                    elif st.type in ['PSYM']:
+                        if source.parser.feed(st.str):
+                            si = source.parser.get()
+                            # print('ParamStk(line=%d name="%s" off=%d type=%d)'
+                            #       % (st.desc, si.name, st.value, si.type))
+                            func.add(si.name, si.type)
+
+                    else:
+                        raise ValueError('%s: not handled!', st.type)
+
+        for section in self.sections:
             section.cleanup(common.lines)
-
-        return cls(sections)

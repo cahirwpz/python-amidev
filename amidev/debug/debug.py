@@ -65,6 +65,8 @@ class Debugger():
             self.regs = data['regs']
             print(self.regs)
             print('')
+        if 'exception' in data:
+            print('Stopped by exception %d' % data['exception'])
         await self.break_show(self.regs['PC'])
 
     async def do_cont(self):
@@ -112,7 +114,8 @@ class Debugger():
 
     async def do_debuginfo_read(self, filename):
         segments = await self.protocol.fetch_segments()
-        debuginfo = DebugInfo.fromFile(filename)
+        debuginfo = DebugInfo()
+        debuginfo.fromFile(filename)
         if debuginfo.relocate(segments):
             self.debuginfo = debuginfo
         else:

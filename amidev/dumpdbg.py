@@ -13,7 +13,8 @@ def main():
         print('Parsing "%s".' % path)
         print('')
 
-        di = DebugInfo.fromFile(path)
+        di = DebugInfo()
+        di.fromFile(path)
         di.dump()
 
         print('')
