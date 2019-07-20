@@ -1,4 +1,5 @@
 import os
+import os.path
 import re
 from collections import namedtuple
 
@@ -348,20 +349,23 @@ class Section():
 
     def ask_source_line(self, path, line):
         for sl in self.lines:
-            if sl.path.endswith(path) and sl.line >= line:
+            if os.path.basename(sl.path.filename) and sl.line >= line:
                 return sl.address
 
     def has_address(self, addr):
         return self.start <= addr and addr < self.end
 
     def dump(self):
-        print('%s [%08X - %08X]:' % (self.hunk.type, self.start, self.end))
+        print(str(self) + ':')
         print('  SYMBOLS:')
         for s in self.symbols:
             print('    ' + str(s))
         print('  LINES:')
         for l in self.lines:
             print('    ' + str(l))
+
+    def __str__(self):
+        return '%s [%08X - %08X]' % (self.hunk.type, self.start, self.end)
 
 
 Scope = namedtuple('Scope', 'begin end values')

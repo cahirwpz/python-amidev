@@ -3,7 +3,8 @@ import linecache
 import logging
 import os
 
-from prompt_toolkit import prompt_async
+from prompt_toolkit.patch_stdout import patch_stdout
+from prompt_toolkit.shortcuts import PromptSession
 from prompt_toolkit.history import InMemoryHistory
 
 from .info import Symbol, SourceLine, DebugInfo
@@ -15,11 +16,9 @@ def print_lines(lines):
         print(line)
 
 
-class Debugger():
-    history = InMemoryHistory()
-
-    def __init__(self, protocol):
-        self.protocol = protocol
+class UaeDebugger():
+    def __init__(self, uae):
+        self.uae = uae
         self.debuginfo = None
         self.breakpoints = []
         self.registers = Registers()
@@ -54,13 +53,13 @@ class Debugger():
         if self.debuginfo:
             sl = self.debuginfo.ask_address(pc)
         if sl is None or sl.path is None:
-            print_lines(await self.protocol.disassemble(pc, 5))
+            print_lines(await self.uae.disassemble(pc, 5))
         else:
             for n in range(sl.line - 2, sl.line + 3):
                 print(n, linecache.getline(sl.path, n).rstrip())
 
     async def prologue(self):
-        data = await self.protocol.prologue()
+        data = await self.uae.prologue()
         if 'regs' in data:
             self.regs = data['regs']
             print(self.regs)
@@ -70,21 +69,17 @@ class Debugger():
         await self.break_show(self.regs['PC'])
 
     async def do_cont(self):
-        self.protocol.cont()
+        self.uae.resume()
         print('Continue...')
         await self.prologue()
 
-    async def do_step(self):
-        self.protocol.step()
-        await self.prologue()
-
     async def do_memory_read(self, addr, length):
-        print(await self.protocol.read_memory(addr, length))
+        print(await self.uae.read_memory(addr, length))
 
     async def do_break_insert(self, addr):
         if self.break_lookup(addr):
             return
-        if not await self.protocol.insert_hwbreak(addr):
+        if not await self.uae.insert_hwbreak(addr):
             return
         bp = BreakPoint(addr)
         self.breakpoints.append(bp)
@@ -96,7 +91,7 @@ class Debugger():
         if not bp:
             return
         self.breakpoints.remove(bp)
-        await self.protocol.remove_hwbreak(addr)
+        await self.uae.remove_hwbreak(addr)
         print('Removed breakpoint #%d' % bp.number)
 
     def do_break_show(self):
@@ -105,15 +100,15 @@ class Debugger():
 
     async def do_disassemble_range(self, addr, end):
         while addr < end:
-            line, = await self.protocol.disassemble(addr, 1)
+            line, = await self.uae.disassemble(addr, 1)
             addr += line.next_address
             print(line)
 
     async def do_info_registers(self):
-        print(await self.protocol.read_all_registers())
+        print(await self.uae.read_registers())
 
     async def do_debuginfo_read(self, filename):
-        segments = await self.protocol.fetch_segments()
+        segments = await self.uae.fetch_segments()
         debuginfo = DebugInfo()
         debuginfo.fromFile(filename)
         if debuginfo.relocate(segments):
@@ -122,11 +117,35 @@ class Debugger():
             print('Failed to associate debug info from "%s" '
                   'file with task sections!' % filename)
 
+    def do_debuginfo_sections(self):
+        try:
+            for section in self.debuginfo.sections:
+                print(section)
+        except AttributeError:
+            print('No segments found - please use "Zf" command!')
+
+    def do_debuginfo_symbol(self, symbol):
+        try:
+            addr = self.debuginfo.ask_symbol(symbol)
+            if addr:
+                print('Symbol "%s" at %08X.' % (symbol, addr))
+            else:
+                print('No symbol "%s" found!' % symbol)
+        except AttributeError:
+            print('No segments found - please use "Zf" command!')
+
+    def do_debuginfo_source_line(self, source, line):
+        try:
+            addr = self.debuginfo.ask_source_line("%s:%d" % (source, line))
+            if addr:
+                print('Line "%s:%d" at %08X.' % (source, line, addr))
+            else:
+                print('Line "%s:%d" found!' % (source, line))
+        except AttributeError:
+            print('No segments found - please use "Zf" command!')
+
     async def do_where_am_I(self):
         await self.break_show(self.regs['PC'])
-
-    async def do_quit(self):
-        await self.protocol.kill()
 
     async def do_command(self, cmd):
         fs = cmd.split()
@@ -144,37 +163,41 @@ class Debugger():
         elif op == 'dr':
             await self.do_disassemble_range(self.address_of(arg[0]),
                                             self.address_of(arg[1]))
-        elif op == 'c':
-            await self.do_cont()
-        elif op == 's':
-            await self.do_step()
-        elif op == 'ir':
+        elif op == 'r':
             await self.do_info_registers()
-        elif op == 'q':
-            await self.do_quit()
         elif op == 'Zf':
             await self.do_debuginfo_read(arg[0])
+        elif op == 'Zl':
+            self.do_debuginfo_sections()
+        elif op == 'Zy':
+            self.do_debuginfo_symbol(arg[0])
+        elif op == 'Zc':
+            self.do_debuginfo_source_line(arg[0], int(arg[1]))
         elif op == '!':
             await self.do_where_am_I()
-        elif op[0] == ':':
-            self.protocol.send(cmd[1:])
-            print_lines(await self.protocol.recv())
+        elif op in ['Z', 'Ze', 'Zs']:
+            print('Command ignored...')
         else:
-            print('Unknown command')
+            print_lines(await self.uae.communicate(cmd))
 
     async def run(self):
-        try:
-            await self.prologue()
-            while True:
-                try:
-                    cmd = await prompt_async('(debug) ', history=self.history,
-                                             patch_stdout=True)
-                    await self.do_command(cmd.strip())
-                except EOFError:
-                    await self.do_cont()
-                except KeyboardInterrupt:
-                    await self.do_quit()
-        except asyncio.CancelledError:
-            pass
-        except Exception as ex:
-            logging.exception('Debugger bug!')
+        history = InMemoryHistory()
+        session = PromptSession('(debug) ', history=history)
+        with patch_stdout():
+            try:
+                await self.prologue()
+                while True:
+                    try:
+                        cmd = await session.prompt(async_=True)
+                        await self.do_command(cmd.strip())
+                    except EOFError:
+                        await self.do_cont()
+            except KeyboardInterrupt:
+                self.uae.terminate()
+            except asyncio.CancelledError:
+                pass
+            except EOFError:
+                pass
+            except Exception as ex:
+                logging.exception('Debugger bug!')
+        print('Quitting...')
