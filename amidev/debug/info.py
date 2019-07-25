@@ -1,9 +1,18 @@
 import os
 import os.path
 import re
+
 from collections import namedtuple
 
+from pygments import highlight
+from pygments.lexers.c_cpp import CLexer
+from pygments.styles import get_style_by_name
+from pygments.formatters import Terminal256Formatter
+
 from amidev.binfmt import hunk
+
+
+TheFormatter = Terminal256Formatter(style=get_style_by_name('monokai'))
 
 
 Segment = namedtuple('Segment', 'start size')
@@ -242,9 +251,9 @@ class Symbol():
 
 
 class SourceLine():
-    def __init__(self, address=0, path=None, line=0, symbol=None):
+    def __init__(self, address=0, src_file=None, line=0, symbol=None):
         self.address = address
-        self.path = path
+        self.src_file = src_file
         self.line = line
         self.symbol = symbol
 
@@ -271,19 +280,27 @@ class SourceLine():
             s += ' at <%s>' % self.name
         else:
             s += ' at <%s+%d>' % (self.name, self.offset)
-        if self.path:
-            s += ' in "%s:%d"' % (self.path, self.line)
+        if self.src_file:
+            s += ' in "%s:%d"' % (self.src_file, self.line)
         return s
 
 
 class SourceFile():
-    def __init__(self, filename):
-        self.filename = filename
+    def __init__(self, path):
+        self.path = path
         self.typemap = {}
         self.parser = StabInfoParser(self.typemap)
+        self.code = None
+
+    def __getitem__(self, index):
+        if self.code is None:
+            with open(self.path) as fh:
+                formatted = highlight(fh.read(), CLexer(), TheFormatter)
+                self.code = formatted.splitlines()
+        return self.code[index]
 
     def __str__(self):
-        return self.filename
+        return self.path
 
 
 class Section():
@@ -331,7 +348,7 @@ class Section():
             for s in self.symbols:
                 if s.name == el.name or s.name[1:] == el.name:
                     s.name = el.name
-                    sl = SourceLine(s.address, el.path, el.line, s)
+                    sl = SourceLine(s.address, el.src_file, el.line, s)
                     self.lines.append(sl)
         self.lines = sorted(self.lines)
 
@@ -349,7 +366,7 @@ class Section():
 
     def ask_source_line(self, path, line):
         for sl in self.lines:
-            if os.path.basename(sl.path.filename) and sl.line >= line:
+            if os.path.basename(sl.src_file.path) and sl.line >= line:
                 return sl.address
 
     def has_address(self, addr):

@@ -1,5 +1,4 @@
 import asyncio
-import linecache
 import logging
 import os
 
@@ -52,11 +51,12 @@ class UaeDebugger():
         sl = None
         if self.debuginfo:
             sl = self.debuginfo.ask_address(pc)
-        if sl is None or sl.path is None:
-            print_lines(await self.uae.disassemble(pc, 5))
-        else:
+        if sl:
             for n in range(sl.line - 2, sl.line + 3):
-                print(n, linecache.getline(sl.path, n).rstrip())
+                indicator = ' >'[n == sl.line]
+                print('{} {:4d} {}'.format(indicator, n, sl.src_file[n]))
+        else:
+            print_lines(await self.uae.disassemble(pc, 5))
 
     async def prologue(self):
         data = await self.uae.prologue()
@@ -67,6 +67,10 @@ class UaeDebugger():
         if 'exception' in data:
             print('Stopped by exception %d' % data['exception'])
         await self.break_show(self.regs['PC'])
+
+    async def do_step(self):
+        self.uae.step()
+        await self.prologue()
 
     async def do_cont(self):
         self.uae.resume()
@@ -94,7 +98,7 @@ class UaeDebugger():
         await self.uae.remove_hwbreak(addr)
         print('Removed breakpoint #%d' % bp.number)
 
-    def do_break_show(self):
+    async def do_break_show(self):
         for bp in sorted(self.breakpoints):
             print('#%d: %s' % (bp.number, self.break_info(bp.address)))
 
@@ -117,14 +121,14 @@ class UaeDebugger():
             print('Failed to associate debug info from "%s" '
                   'file with task sections!' % filename)
 
-    def do_debuginfo_sections(self):
+    async def do_debuginfo_sections(self):
         try:
             for section in self.debuginfo.sections:
                 print(section)
         except AttributeError:
             print('No segments found - please use "Zf" command!')
 
-    def do_debuginfo_symbol(self, symbol):
+    async def do_debuginfo_symbol(self, symbol):
         try:
             addr = self.debuginfo.ask_symbol(symbol)
             if addr:
@@ -134,7 +138,7 @@ class UaeDebugger():
         except AttributeError:
             print('No segments found - please use "Zf" command!')
 
-    def do_debuginfo_source_line(self, source, line):
+    async def do_debuginfo_source_line(self, source, line):
         try:
             addr = self.debuginfo.ask_source_line("%s:%d" % (source, line))
             if addr:
@@ -147,35 +151,46 @@ class UaeDebugger():
     async def do_where_am_I(self):
         await self.break_show(self.regs['PC'])
 
+    commands = {
+        'mr': lambda self, arg:
+            self.do_memory_read(self.address_of(arg[0]), int(arg[1])),
+        'b': lambda self, arg:
+            self.do_break_insert(self.address_of(arg[0])),
+        'bd': lambda self, arg:
+            self.do_break_remove(self.address_of(arg[0])),
+        'bl': lambda self, arg:
+            self.do_break_show(),
+        'dr': lambda self, arg:
+            self.do_disassemble_range(self.address_of(arg[0]),
+                                      self.address_of(arg[1])),
+        't': lambda self, arg:
+            self.do_step(),
+        'g': lambda self, arg:
+            self.do_cont(),
+        'r': lambda self, arg:
+            self.do_info_registers(),
+        'Zf': lambda self, arg:
+            self.do_debuginfo_read(arg[0]),
+        'Zl': lambda self, arg:
+            self.do_debuginfo_sections(),
+        'Zy': lambda self, arg:
+            self.do_debuginfo_symbol(arg[0]),
+        'Zc': lambda self, arg:
+            self.do_debuginfo_source_line(arg[0], int(arg[1])),
+        '!': lambda self, arg:
+            self.do_where_am_I()
+    }
+
+    commands_ignored = ['Z', 'Ze', 'Zs']
+
     async def do_command(self, cmd):
         fs = cmd.split()
         if not fs:
             return
         op, arg = fs[0], fs[1:]
-        if op == 'mr':
-            await self.do_memory_read(self.address_of(arg[0]), int(arg[1]))
-        elif op == 'b':
-            await self.do_break_insert(self.address_of(arg[0]))
-        elif op == 'bd':
-            await self.do_break_remove(self.address_of(arg[0]))
-        elif op == 'bl':
-            self.do_break_show()
-        elif op == 'dr':
-            await self.do_disassemble_range(self.address_of(arg[0]),
-                                            self.address_of(arg[1]))
-        elif op == 'r':
-            await self.do_info_registers()
-        elif op == 'Zf':
-            await self.do_debuginfo_read(arg[0])
-        elif op == 'Zl':
-            self.do_debuginfo_sections()
-        elif op == 'Zy':
-            self.do_debuginfo_symbol(arg[0])
-        elif op == 'Zc':
-            self.do_debuginfo_source_line(arg[0], int(arg[1]))
-        elif op == '!':
-            await self.do_where_am_I()
-        elif op in ['Z', 'Ze', 'Zs']:
+        if op in self.commands:
+            await self.commands[op](self, arg)
+        elif op in self.commands_ignored:
             print('Command ignored...')
         else:
             print_lines(await self.uae.communicate(cmd))

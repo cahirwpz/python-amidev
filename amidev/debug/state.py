@@ -34,10 +34,14 @@ class Registers():
     def __setitem__(self, name, value):
         self._regs[name] = int(value)
 
+    def _printable(self, name):
+        val = self._regs.get(name)
+        if name == 'SR':
+            return '{}={:04X}'.format(name, val)
+        return '{}={:08X}'.format(name, val)
+
     def __str__(self):
-        regs = self._regs
-        l0 = ' '.join('%s=%08X' % (n, regs[n]) for n in self.names[:8])
-        l1 = ' '.join('%s=%08X' % (n, regs[n]) for n in self.names[8:16])
-        l2 = ' '.join('%s=%08X' % (n, regs[n]) for n in self.names[16:19])
-        l2 += ' SR=%04X' % regs['SR']
+        l0 = ' '.join(self._printable(n) for n in self.names[:8])
+        l1 = ' '.join(self._printable(n) for n in self.names[8:16])
+        l2 = ' '.join(self._printable(n) for n in self.names[16:])
         return '\n'.join([l0, l1, l2])
